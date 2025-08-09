@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudTrail trail with KMS encryption and S3 bucket
+
+Parameters:
+  TrailName:
+    Type: String
+    Default: AccountTrail
+  TrailBucketName:
+    Type: String
+    Description: Globally unique S3 bucket name for CloudTrail logs
+  KmsAliasName:
+    Type: String
+    Default: alias/cloudtrail-key
+
+Resources:
+  TrailKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for CloudTrail log encryption
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal: { AWS: !Sub arn:aws:iam::${AWS::AccountId}:root }
+            Action: 'kms:*'
+            Resource: '*'
+      EnableKeyRotation: true
+
+  TrailKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Ref KmsAliasName
+      TargetKeyId: !Ref TrailKey
+
+  TrailBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref TrailBucketName
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  TrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TrailBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: 's3:PutObject'
+            Resource: !Sub '${TrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*'
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: 's3:GetBucketAcl'
+            Resource: !GetAtt TrailBucket.Arn
+
+  Trail:
+    Type: AWS::CloudTrail::Trail
+    Properties:
+      TrailName: !Ref TrailName
+      S3BucketName: !Ref TrailBucketName
+      IsLogging: true
+      IncludeGlobalServiceEvents: true
+      IsMultiRegionTrail: true
+      EnableLogFileValidation: true
+      KMSKeyId: !GetAtt TrailKey.Arn
